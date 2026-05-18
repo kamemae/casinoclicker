@@ -18,14 +18,14 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'SPIN',
-          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🎯</Text>,
+          title: '777',
+          tabBarIcon: () => <Text style={{ fontSize: 20 }}>🎰</Text>,
         }}
       />
       <Tabs.Screen
         name="coinflip"
         options={{
-          title: 'Coin Flip',
+          title: 'Coin',
           tabBarIcon: () => <Text style={{ fontSize: 20 }}>🪙</Text>,
         }}
       />
@@ -39,7 +39,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="plinko"
         options={{
-          title: 'Plinko',
+          title: 'Plinko (ERROR)',
           tabBarIcon: () => <Text style={{ fontSize: 20 }}>🔺</Text>,
         }}
       />

@@ -1,12 +1,12 @@
 import { useIsFocused } from "@react-navigation/native";
 import { useAudioPlayer } from "expo-audio";
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, ImageBackground, PanResponder, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, ImageBackground, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { MoneyManager } from "../../api/moneyManager";
 
 const FRUITS = ["🍉", "🍋", "🍌", "🍍", "🍒", "🍇", "🥝"];
-const LEVER_MAX_DRAG = 80;
-const audio = require("../../assets/audio/base/sth.mp3");
+const LEVER_MAX_DRAG = 90;
+const audio = require("../../assets/audio/base/spin.mp3");
 
 const generateRandomGrid = () => [
   [FRUITS[Math.floor(Math.random() * FRUITS.length)], FRUITS[Math.floor(Math.random() * FRUITS.length)], FRUITS[Math.floor(Math.random() * FRUITS.length)]],
@@ -68,15 +68,34 @@ export default function SlotMachine() {
     }
   };
 
+  // Handles direct numeric typing inputs smoothly
+  const handleCustomBetInput = (text: string) => {
+    if (spinning) return;
+    
+    const sanitizedText = text.replace(/[^0-9]/g, "");
+    if (sanitizedText === "") {
+      setBet(0);
+      return;
+    }
+
+    const parsedBet = parseInt(sanitizedText, 10);
+    if (parsedBet <= credits) {
+      setBet(parsedBet);
+    } else {
+      setBet(credits); // Max out capacity securely if they try to over-wager
+    }
+  };
+
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true, 
       onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy >= 0 && gestureState.dy <= LEVER_MAX_DRAG) {
+        if (!spinning && gestureState.dy >= 0 && gestureState.dy <= LEVER_MAX_DRAG && bet > 0) {
           leverY.setValue(gestureState.dy);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
+        if (spinning || bet === 0) return;
         if (gestureState.dy >= LEVER_MAX_DRAG * 0.7) {
           Animated.sequence([
             Animated.timing(leverY, { toValue: LEVER_MAX_DRAG, duration: 50, useNativeDriver: true }),
@@ -93,13 +112,16 @@ export default function SlotMachine() {
   const triggerSpin = async () => {
     if (spinning) return;
 
-    // FIX 1: Fetch directly from storage API to prevent reading stale, batching state copies
     const freshCredits = await MoneyManager.getCredits();
     const activeBet = currentBetRef.current;
 
-    if (freshCredits < activeBet || activeBet === 0) {
+    if (activeBet <= 0) {
+      setMessage("🚫 CHOOSE A VALID WAGER! 🚫");
+      return;
+    }
+
+    if (freshCredits < activeBet) {
       setMessage("🚫 INSUFFICIENT CREDITS! 🚫");
-      // Sync local state visually just in case it got out of sync
       setCredits(freshCredits);
       return;
     }
@@ -118,7 +140,7 @@ export default function SlotMachine() {
     setCredits(balanceAfterBet);
     await MoneyManager.saveCredits(balanceAfterBet);
 
-    const SPIN_DURATION = 9000;
+    const SPIN_DURATION = 9000; // Restored back to match the original audio track layout
     const startTime = Date.now();
 
     const runShuffleCycle = () => {
@@ -129,7 +151,6 @@ export default function SlotMachine() {
         setMessage("🛑 CALCULATING... 🛑");
         setTimeout(() => {
           setSpinning(false);
-          // Pass absolute true context down to calculation
           calculateWin(finalGrid, balanceAfterBet, activeBet);
         }, 1500);
         return;
@@ -259,7 +280,7 @@ export default function SlotMachine() {
           <View style={styles.leverTrack}>
             <View style={styles.leverBase} />
             <Animated.View style={[ styles.leverRod, { transform: [{ scaleY: rodScaleY }], transformOrigin: "bottom" }]} />
-            <Animated.View {...(!disableButtons ? panResponder.panHandlers : {})} style={[ styles.leverKnob, { transform: [{ translateY: leverY }] }, disableButtons && styles.leverKnobDisabled]} />
+            <Animated.View {...(!disableButtons && bet > 0 ? panResponder.panHandlers : {})} style={[ styles.leverKnob, { transform: [{ translateY: leverY }] }, (disableButtons || bet === 0) && styles.leverKnobDisabled]} />
           </View>
         </View>
 
@@ -267,10 +288,27 @@ export default function SlotMachine() {
           <TouchableOpacity style={[styles.arcadeButton, styles.blueBtn, spinning && styles.disabledBtn]} onPress={() => changeBet(-5)} disabled={spinning}>
             <Text style={styles.btnText}>BET -5</Text>
           </TouchableOpacity>
+
+          {/* Core Custom Bet Terminal Block aligned to deck dimensions */}
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={[styles.customBetInput, spinning && styles.disabledInput]}
+              keyboardType="number-pad"
+              value={bet === 0 ? "" : bet.toString()}
+              onChangeText={handleCustomBetInput}
+              maxLength={6}
+              editable={!spinning}
+              placeholder="0"
+              placeholderTextColor="#555"
+              selectTextOnFocus
+            />
+          </View>
+
           <TouchableOpacity style={[styles.arcadeButton, styles.blueBtn, spinning && styles.disabledBtn]} onPress={() => changeBet(5)} disabled={spinning}>
             <Text style={styles.btnText}>BET +5</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.arcadeButton, styles.spinBtn, disableButtons && styles.disabledBtn]} onPress={triggerSpin} disabled={disableButtons}>
+
+          <TouchableOpacity style={[styles.arcadeButton, styles.spinBtn, (disableButtons || bet === 0) && styles.disabledBtn]} onPress={triggerSpin} disabled={disableButtons || bet === 0}>
             <Text style={styles.spinBtnText}>SPIN</Text>
           </TouchableOpacity>
         </View>
@@ -279,7 +317,6 @@ export default function SlotMachine() {
   );
 }
 
-// Styles remain unchanged
 const styles = StyleSheet.create({
   background: { flex: 1 },
   container: { flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.45)" },
@@ -303,11 +340,16 @@ const styles = StyleSheet.create({
   leverRod: { width: 12, height: 100, backgroundColor: "#dcdde1", borderLeftWidth: 3, borderColor: "#f5f6fa", position: "absolute", bottom: 65, zIndex: 1 },
   leverKnob: { width: 46, height: 46, borderRadius: 23, backgroundColor: "#e84118", borderWidth: 3, borderColor: "#fbc531", position: "absolute", top: 30, zIndex: 2, shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.5, shadowRadius: 4, elevation: 6 },
   leverKnobDisabled: { backgroundColor: "#718093", borderColor: "#4f5d73" },
-  buttonConsoleDeck: { flexDirection: 'row', backgroundColor: '#2f3640', padding: 12, borderRadius: 16, marginTop: 25, borderWidth: 3, borderColor: '#718093', width: 360, justifyContent: 'space-between', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 8 },
-  arcadeButton: { paddingVertical: 12, paddingHorizontal: 10, borderRadius: 10, justifyContent: 'center', alignItems: 'center', minWidth: 90, borderBottomWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3 },
+  
+  buttonConsoleDeck: { flexDirection: 'row', backgroundColor: '#2f3640', padding: 12, borderRadius: 16, marginTop: 25, borderWidth: 3, borderColor: '#718093', width: 350, justifyContent: 'space-between', alignItems: 'center', shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 8 },
+  arcadeButton: { paddingVertical: 12, paddingHorizontal: 6, borderRadius: 10, justifyContent: 'center', alignItems: 'center', minWidth: 65, borderBottomWidth: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3 },
   blueBtn: { backgroundColor: '#00a8ff', borderBottomColor: '#0088cc' },
-  spinBtn: { backgroundColor: '#4cd137', borderBottomColor: '#44bd32', minWidth: 110 },
+  spinBtn: { backgroundColor: '#4cd137', borderBottomColor: '#44bd32', minWidth: 80 },
   disabledBtn: { backgroundColor: '#718093', borderBottomColor: '#2f3640', opacity: 0.6 },
   btnText: { color: '#fff', fontSize: 11, fontWeight: 'bold' },
-  spinBtnText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1 }
+  spinBtnText: { color: '#fff', fontSize: 14, fontWeight: '900', letterSpacing: 1 },
+
+  inputWrapper: { width: 70, height: 42, backgroundColor: '#000', borderRadius: 8, borderWidth: 2, borderColor: '#ffcc00', justifyContent: 'center', alignItems: 'center' },
+  customBetInput: { width: '100%', height: '100%', color: '#ffcc00', fontSize: 16, fontWeight: '900', textAlign: 'center', padding: 0 },
+  disabledInput: { color: '#555', opacity: 0.7 }
 });
